@@ -1,0 +1,36 @@
+# Web Framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+
+# Database
+sqlalchemy==2.0.41
+asyncpg==0.30.0
+alembic==1.15.2
+
+# Redis
+redis[hiredis]==6.2.0
+
+# Auth & Security
+pyjwt[crypto]==2.10.1
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.20
+
+# OAuth
+authlib==1.6.0
+httpx==0.28.1
+
+# Email
+aiosmtplib==3.0.2
+sendgrid==6.11.0
+
+# 2FA
+pyotp==2.9.0
+qrcode[pil]==8.2
+
+# Validation & Config
+pydantic[email-validator]==2.11.5
+pydantic-settings==2.9.1
+python-dotenv==1.1.0
+
+# Logging
+structlog==25.4.0
