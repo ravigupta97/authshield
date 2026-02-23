@@ -21,6 +21,7 @@ KEY CONCEPTS:
 """
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
@@ -30,15 +31,6 @@ from app.db.base import Base, UUIDMixin
 
 
 class RefreshToken(UUIDMixin, Base):
-    """
-    Represents a single refresh token in a rotation chain.
-
-    Lifecycle:
-    CREATED (is_used=False, is_revoked=False)
-        → USED (is_used=True) when rotated — new token created
-        → REVOKED (is_revoked=True) on logout or security event
-    """
-
     __tablename__ = "refresh_tokens"
 
     # ── Ownership ─────────────────────────────────────────────────
@@ -46,49 +38,35 @@ class RefreshToken(UUIDMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,  # We query by user_id when revoking all user tokens
+        index=True,
     )
 
     # ── Token Data ────────────────────────────────────────────────
-    # bcrypt hash of the actual token string sent to the client.
-    token_hash: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
+    # bcrypt hash of the actual token string sent to the client
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # Groups all tokens from one login session together.
-    # Used for reuse detection — if reuse detected, revoke entire family.
+    # Groups all tokens from one login together for reuse detection
     family_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         nullable=False,
         index=True,
-        default=uuid.uuid4,  # Each login creates a new family
+        default=uuid.uuid4,
     )
 
     # ── Status Flags ──────────────────────────────────────────────
-    # True after this token has been rotated (used to get a new token).
-    # Presenting a used token triggers reuse detection.
-    is_used: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
-    # True after explicit logout or admin revocation.
-    is_revoked: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
+    # True after this token has been rotated
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # True after explicit logout or admin revocation
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # ── Expiry ────────────────────────────────────────────────────
-    expires_at: Mapped[uuid.UUID] = mapped_column(
+    expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
     )
 
-    # Self-referential FK: points to the token that replaced this one.
-    # Token A → replaced_by → Token B → replaced_by → Token C
-    # Lets us trace the full rotation chain for debugging.
+    # Chain: Token A → replaced_by → Token B → replaced_by → Token C
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("refresh_tokens.id", ondelete="SET NULL"),
@@ -103,7 +81,7 @@ class RefreshToken(UUIDMixin, Base):
     session: Mapped["Session | None"] = relationship(  # type: ignore[name-defined]
         "Session",
         back_populates="refresh_token",
-        uselist=False,  # One-to-one: each token belongs to one session
+        uselist=False,
     )
 
     def __repr__(self) -> str:

@@ -1,20 +1,13 @@
 """
 
 Tracks active login sessions across devices.
-
-Each login creates one Session record. Users can see all their
-active sessions (like Google's "Manage devices" page) and revoke
-individual ones remotely.
-
-A Session is linked 1-to-1 with a RefreshToken because:
-- The refresh token IS the session credential
-- Revoking a session = revoking its refresh token
-- They live and die together
+Each login creates one Session linked 1-to-1 with a RefreshToken.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,10 +15,6 @@ from app.db.base import Base, UUIDMixin
 
 
 class Session(UUIDMixin, Base):
-    """
-    Represents one active login session on one device.
-    """
-
     __tablename__ = "sessions"
 
     # ── Ownership ─────────────────────────────────────────────────
@@ -36,32 +25,17 @@ class Session(UUIDMixin, Base):
         index=True,
     )
 
-    # Link to the refresh token that keeps this session alive.
-    # When the refresh token is revoked, this session is dead.
     refresh_token_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("refresh_tokens.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,  # One session per refresh token
+        unique=True,
     )
 
     # ── Device / Client Info ──────────────────────────────────────
-    # IPv4 (max 15 chars) or IPv6 (max 45 chars)
-    ip_address: Mapped[str | None] = mapped_column(
-        String(45),
-        nullable=True,
-    )
-    # Raw User-Agent header from the login request
-    user_agent: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-    )
-    # Human-readable device info parsed from user_agent
-    # e.g. "Chrome on Windows", "Safari on iPhone"
-    device_info: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    device_info: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # ── Status ────────────────────────────────────────────────────
     is_active: Mapped[bool] = mapped_column(
@@ -69,20 +43,19 @@ class Session(UUIDMixin, Base):
         default=True,
         nullable=False,
     )
-    # Updated every time the session's refresh token is used.
-    # Shows users "last active" time on the sessions page.
-    last_active_at: Mapped[uuid.UUID] = mapped_column(
+
+    last_active_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
     # ── Timing ────────────────────────────────────────────────────
-    created_at: Mapped[uuid.UUID] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
-    # Matches the refresh token's expires_at
-    expires_at: Mapped[uuid.UUID] = mapped_column(
+    expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
     )

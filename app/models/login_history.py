@@ -1,23 +1,16 @@
 """
+
 Immutable audit log of every login attempt (success or failure).
-
-WHY IMMUTABLE?
-Audit logs should never be edited or deleted (except by retention policy).
-We never UPDATE rows here — only INSERT. This gives you a trustworthy
-record of all authentication events.
-
-WHY A SEPARATE TABLE?
-- Keeps the users table clean and fast
-- Failed attempts don't pollute user data
-- Easy to query "all failed attempts in the last hour from this IP"
-- Compliance: many regulations require login audit trails
+Never updated after creation — append only.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.db.base import Base, UUIDMixin
 
 
@@ -29,9 +22,8 @@ class LoginHistory(UUIDMixin, Base):
 
     __tablename__ = "login_history"
 
-    # ── Who ───────────────────────────────────────────────────────
-    # SET NULL on delete so we keep the audit record even if user
-    # is deleted. Important for compliance/forensics.
+    # SET NULL on delete so we keep the audit record even if
+    # the user account is deleted. Important for forensics.
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -39,7 +31,6 @@ class LoginHistory(UUIDMixin, Base):
         index=True,
     )
 
-    # ── Where From ────────────────────────────────────────────────
     ip_address: Mapped[str | None] = mapped_column(
         String(45),
         nullable=True,
@@ -49,25 +40,26 @@ class LoginHistory(UUIDMixin, Base):
         nullable=True,
     )
 
-    # ── What Happened ─────────────────────────────────────────────
     # 'success' or 'failed'
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
     )
-    # Only set on failure. e.g. "wrong_password", "unverified_email"
+
+    # Only populated on failure
+    # e.g. "wrong_password", "unverified_email", "account_disabled"
     failure_reason: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
 
-    # ── When ──────────────────────────────────────────────────────
-    created_at: Mapped[uuid.UUID] = mapped_column(
-        String(50),   # stored as ISO string for simplicity in audit logs
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
-    # ── Relationships ─────────────────────────────────────────────
+    # Relationship back to user (nullable because user may be deleted)
     user: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
         "User",
         back_populates="login_history",
