@@ -1,19 +1,17 @@
 """
 
-Business logic for token operations:
-creating, validating, rotating, and blacklisting tokens.
+Business logic for all token lifecycle operations.
+Creating, verifying, rotating, and blacklisting tokens.
 """
 
 import uuid
+from datetime import datetime, timezone
 
+import jwt
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import (
-    create_access_token,
-    create_refresh_token,
-    decode_access_token,
-)
+from app.config import settings
 from app.core.exceptions import (
     RefreshTokenInvalidError,
     RefreshTokenReuseError,
@@ -21,27 +19,23 @@ from app.core.exceptions import (
     TokenInvalidError,
     TokenRevokedError,
 )
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+)
 from app.db.redis import get_redis
-from app.models.refresh_token import RefreshToken
 from app.models.user import User
-from app.repositories.token_repository import TokenRepository
 from app.repositories.session_repository import SessionRepository
-from app.config import settings
-
-import jwt
+from app.repositories.token_repository import TokenRepository
 
 log = structlog.get_logger()
 
-# Redis key for blacklisted JWT IDs
+# Redis key templates
 BLACKLIST_KEY = "blacklist:{jti}"
 
 
 class TokenService:
-    """
-    Handles all token lifecycle operations.
-    Works with both JWT access tokens and opaque refresh tokens.
-    """
-
     def __init__(self, db: AsyncSession):
         self.db = db
         self.token_repo = TokenRepository(db)
@@ -59,13 +53,9 @@ class TokenService:
         Create a complete token pair (access + refresh) for a user.
         Also creates a session record.
 
-        Called on:
-        - Successful login (family_id=None → new family created)
-        - Token rotation (family_id=existing → continues family chain)
-
-        Returns a dict with all token data needed for the response.
+        family_id=None  → brand new login, new family created
+        family_id=value → rotation, continues existing family chain
         """
-        # Create the raw refresh token string
         raw_refresh_token = create_refresh_token()
 
         # Store hashed refresh token in DB
@@ -75,9 +65,8 @@ class TokenService:
             family_id=family_id,
         )
 
-        # Create or update session
+        # New login → create new session
         if family_id is None:
-            # New login → create new session
             session = await self.session_repo.create(
                 user_id=user.id,
                 refresh_token_id=db_refresh_token.id,
@@ -86,12 +75,16 @@ class TokenService:
                 device_info=device_info,
             )
         else:
-            # Token rotation → update existing session's refresh token link
-            session = await self.session_repo.get_by_refresh_token_id(
-                db_refresh_token.id
+            # Token rotation → find existing session and link new token
+            # We need to find the session by user_id and update it
+            sessions = await self.session_repo.get_active_sessions_for_user(
+                user.id
             )
-            # If session not found (edge case), create a new one
+            # Find the session that matches our family (most recently active)
+            session = sessions[0] if sessions else None
+
             if not session:
+                # Edge case: session was manually revoked, create new one
                 session = await self.session_repo.create(
                     user_id=user.id,
                     refresh_token_id=db_refresh_token.id,
@@ -99,6 +92,10 @@ class TokenService:
                     user_agent=user_agent,
                     device_info=device_info,
                 )
+            else:
+                # Update session to point to the new refresh token
+                session.refresh_token_id = db_refresh_token.id
+                await self.session_repo.update_last_active(session)
 
         # Create JWT access token
         access_token, jti = create_access_token(
@@ -121,12 +118,10 @@ class TokenService:
         """
         Verify a JWT access token and return its payload.
 
-        Checks:
-        1. JWT signature and expiry (PyJWT handles this)
-        2. Token is not blacklisted in Redis
-        3. Token type is 'access' (not some other token type)
-
-        Raises appropriate exceptions on any failure.
+        Checks in order:
+        1. JWT signature and expiry (PyJWT)
+        2. Token type is 'access'
+        3. Not blacklisted in Redis
         """
         # Step 1: Decode and verify JWT
         try:
@@ -153,36 +148,40 @@ class TokenService:
     async def rotate_refresh_token(
         self,
         raw_refresh_token: str,
+        user,                        # User object (loaded by caller)
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> tuple[RefreshToken, dict]:
+    ) -> dict:
         """
-        Rotate a refresh token — invalidate old, issue new.
+        Rotate a refresh token — invalidate old, issue new pair.
 
-        This is the core of our security model:
-        1. Find the token in DB
-        2. Check if it's valid (not used, not revoked, not expired)
-        3. If already USED → REUSE DETECTED → revoke entire family
-        4. If valid → mark as used → issue new token pair
+        This is the core of our refresh token security model.
 
-        Returns (old_token, new_token_data)
+        REUSE DETECTION LOGIC:
+        If someone presents a token that was already used (is_used=True),
+        it means either:
+        a) The legitimate user's token was stolen, attacker used it first
+        b) The attacker's stolen token was used, legitimate user tried theirs
+
+        Either way: revoke the ENTIRE family. Both parties are kicked out.
+        The legitimate user must re-login. Minor inconvenience vs security.
         """
-        # Step 1: Find token
+        # Step 1: Find token in DB
         token = await self.token_repo.get_by_raw_token(raw_refresh_token)
 
         if not token:
             raise RefreshTokenInvalidError()
 
-        # Step 2: Check for reuse FIRST (before checking revoked/expired)
-        # WHY? A used token might also be revoked (we revoke the family).
-        # We want to give the reuse error, not the generic invalid error.
+        # Step 2: Reuse detection FIRST
+        # Check is_used before is_revoked — a reused token might also
+        # be revoked (we revoke the family on detection). We want to
+        # give the specific reuse error, not the generic invalid error.
         if token.is_used:
             log.warning(
-                "Refresh token reuse detected — revoking family",
+                "Refresh token reuse detected — revoking entire family",
                 family_id=str(token.family_id),
                 user_id=str(token.user_id),
             )
-            # Revoke the entire family — attacker's current token dies too
             await self.token_repo.revoke_token_family(token.family_id)
             await self.db.commit()
             raise RefreshTokenReuseError()
@@ -191,7 +190,38 @@ class TokenService:
         if not await self.token_repo.is_token_valid(token):
             raise RefreshTokenInvalidError()
 
-        return token
+        # Step 4: Verify token belongs to the correct user
+        # (Extra safety: prevent using another user's refresh token)
+        if token.user_id != user.id:
+            raise RefreshTokenInvalidError()
+
+        # Step 5: Mark old token as used and record what replaced it
+        # We'll update replaced_by_id after creating the new token
+        token.is_used = True
+        await self.db.flush()
+
+        # Step 6: Create new token pair (same family_id = continues chain)
+        new_token_data = await self.create_tokens_for_user(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            family_id=token.family_id,  # ← Same family, continues chain
+        )
+
+        # Step 7: Link old token to new one (for audit chain)
+        new_db_token = await self.token_repo.get_by_raw_token(
+            new_token_data["refresh_token"]
+        )
+        if new_db_token:
+            token.replaced_by_id = new_db_token.id
+
+        log.info(
+            "Refresh token rotated",
+            user_id=str(user.id),
+            family_id=str(token.family_id),
+        )
+
+        return new_token_data
 
     async def blacklist_access_token(
         self,
@@ -199,12 +229,11 @@ class TokenService:
         expires_in_seconds: int,
     ) -> None:
         """
-        Add a JWT's ID to the Redis blacklist.
+        Add a JWT's unique ID to Redis blacklist.
 
-        WHY TTL = remaining token lifetime?
-        After the token would have expired naturally, we don't need
-        to keep it blacklisted anymore (expired tokens are already
-        rejected by PyJWT). This keeps Redis memory usage minimal.
+        TTL = remaining token lifetime.
+        Once the token would have naturally expired, Redis
+        automatically removes the blacklist entry. Self-cleaning.
         """
         if expires_in_seconds > 0:
             redis = get_redis()
@@ -213,8 +242,23 @@ class TokenService:
                 expires_in_seconds,
                 "1",
             )
+            log.info("Access token blacklisted", jti=jti)
+
+    def get_token_remaining_seconds(self, payload: dict) -> int:
+        """
+        Calculate how many seconds remain until a JWT expires.
+        Used to set the Redis blacklist TTL precisely.
+        """
+        exp = payload.get("exp", 0)
+        now = datetime.now(timezone.utc).timestamp()
+        remaining = int(exp - now)
+        return max(remaining, 0)  # Never negative
 
     async def revoke_all_user_tokens(self, user_id: uuid.UUID) -> None:
-        """Revoke all tokens and deactivate all sessions for a user."""
+        """
+        Revoke all tokens and deactivate all sessions for a user.
+        Used on: logout-all, password reset, account deactivation.
+        """
         await self.token_repo.revoke_all_user_tokens(user_id)
         await self.session_repo.deactivate_all_for_user(user_id)
+        log.info("All tokens revoked for user", user_id=str(user_id))

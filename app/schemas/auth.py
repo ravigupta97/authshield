@@ -126,3 +126,18 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str | None = None  # Optional but recommended
+
+# ── Refresh Response ────────────────────────────────────────────────────────
+
+class RefreshResponse(BaseModel):
+    """Returned after successful token rotation."""
+    access_token: str
+    refresh_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+
+# ── Logout Request ────────────────────────────────────────────────────────
+
+class LogoutRequest(BaseModel):
+    """Client sends the refresh token so we can revoke it."""
+    refresh_token: str | None = None

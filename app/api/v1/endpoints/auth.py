@@ -9,12 +9,16 @@ Responsibilities:
 """
 
 from fastapi import APIRouter, Depends, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_db
+from app.api.v1.dependencies import CurrentUser, get_db
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    LogoutRequest,
+    RefreshRequest,
+    RefreshResponse,
     RegisterRequest,
     RegisterResponse,
     ResendVerificationRequest,
@@ -24,6 +28,10 @@ from app.schemas.common import StandardResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter()
+
+# We need the raw token string for logout blacklisting
+# auto_error=False so we can give a clean error message
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @router.post(
@@ -90,23 +98,12 @@ async def resend_verification(
     status_code=status.HTTP_200_OK,
     response_model=StandardResponse[LoginResponse],
     summary="Login with email and password",
-    description=(
-        "Authenticates a user and returns a JWT access token (15 min) "
-        "and a refresh token (7 days). The account must be verified first."
-    ),
 )
 async def login(
     request_data: LoginRequest,
-    request: Request,          # FastAPI injects the raw request
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Login endpoint.
-
-    We extract IP and User-Agent from the request here (HTTP concern),
-    then pass them to the service (which doesn't know about HTTP).
-    """
-    # Extract client info for session tracking and audit log
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
@@ -117,8 +114,109 @@ async def login(
         ip_address=ip_address,
         user_agent=user_agent,
     )
-
     return StandardResponse.success(
         message="Login successful.",
         data=LoginResponse(**login_data),
+    )
+
+
+@router.post(
+    "/refresh",
+    status_code=status.HTTP_200_OK,
+    response_model=StandardResponse[RefreshResponse],
+    summary="Refresh access token",
+    description=(
+        "Exchange a valid refresh token for a new access token and "
+        "new refresh token. The old refresh token is immediately invalidated. "
+        "Store the new refresh token — the old one cannot be used again."
+    ),
+)
+async def refresh_tokens(
+    request_data: RefreshRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Token refresh endpoint.
+
+    The client calls this when their access token expires (every 15 min).
+    They send their refresh token and get a brand new token pair back.
+
+    IMPORTANT: The client must save the NEW refresh token.
+    Using the old one again triggers reuse detection.
+    """
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
+    service = AuthService(db)
+    token_data = await service.refresh_tokens(
+        raw_refresh_token=request_data.refresh_token,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return StandardResponse.success(
+        message="Tokens refreshed successfully.",
+        data=RefreshResponse(**token_data),
+    )
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_200_OK,
+    response_model=StandardResponse,
+    summary="Logout current session",
+)
+async def logout(
+    request_data: LogoutRequest,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Logout endpoint.
+
+    Immediately invalidates the access token (via Redis blacklist)
+    and revokes the refresh token (via DB flag).
+
+    After this call:
+    - The access token will be rejected even if not yet expired
+    - The refresh token cannot be used to get new tokens
+    - The session is marked inactive
+    """
+    if not credentials:
+        return StandardResponse.success(message="Logged out successfully.")
+
+    service = AuthService(db)
+    await service.logout(
+        access_token=credentials.credentials,
+        refresh_token=request_data.refresh_token,
+    )
+    return StandardResponse.success(message="Logged out successfully.")
+
+
+@router.post(
+    "/logout-all",
+    status_code=status.HTTP_200_OK,
+    response_model=StandardResponse,
+    summary="Logout from all devices",
+)
+async def logout_all(
+    current_user: CurrentUser,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Logout from ALL devices simultaneously.
+
+    Revokes every refresh token and deactivates every session
+    for this user — regardless of which device they were created on.
+    """
+    access_token = credentials.credentials if credentials else ""
+
+    service = AuthService(db)
+    await service.logout_all(
+        user_id=current_user.id,
+        access_token=access_token,
+    )
+    return StandardResponse.success(
+        message="Logged out from all devices successfully."
     )
