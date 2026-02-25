@@ -197,3 +197,25 @@ def create_refresh_token() -> str:
     The 'rt_' prefix makes it easy to identify in logs.
     """
     return f"rt_{generate_secure_token(64)}"
+
+
+def generate_oauth_state() -> str:
+    """
+    Generate a cryptographically secure state parameter for OAuth.
+
+    The state parameter is a CSRF protection mechanism.
+
+    HOW IT WORKS:
+    1. We generate a random state token before redirecting to Google
+    2. We store it in Redis with a short TTL
+    3. Google includes it in the callback URL
+    4. We verify the callback's state matches what we stored
+    5. If it doesn't match → CSRF attack → reject the request
+
+    WHY is this necessary?
+    Without state, an attacker could craft a malicious callback URL
+    and trick a user's browser into completing an OAuth flow the
+    attacker initiated — linking the attacker's Google account to
+    the victim's session.
+    """
+    return generate_secure_token(32)
