@@ -141,3 +141,46 @@ class RefreshResponse(BaseModel):
 class LogoutRequest(BaseModel):
     """Client sends the refresh token so we can revoke it."""
     refresh_token: str | None = None
+
+
+# ── Password Reset ────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    """Client sends their email to request a reset link."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """
+    Client sends the token from the email + their new password.
+    Token comes from the URL: /reset-password?token=xxx
+    """
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        from app.core.security import validate_password_strength
+        errors = validate_password_strength(v)
+        if errors:
+            raise ValueError(" | ".join(errors))
+        return v
+
+
+class ChangePasswordRequest(BaseModel):
+    """
+    Authenticated user changing their own password.
+    Requires current password to verify identity.
+    """
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        from app.core.security import validate_password_strength
+        errors = validate_password_strength(v)
+        if errors:
+            raise ValueError(" | ".join(errors))
+        return v
