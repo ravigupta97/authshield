@@ -128,21 +128,39 @@ class InsufficientPermissionsError(AuthShieldException):
 
 
 class TwoFactorRequiredError(AuthShieldException):
-    """Login successful but 2FA verification is still needed."""
-    def __init__(self, temp_token: str):
+    """
+    Raised during login when 2FA is enabled.
+    Carries a temp_token the client uses to complete 2FA verification.
+    The temp_token is stored in Redis for 5 minutes.
+    """
+    def __init__(self, temp_token: str = ""):
         super().__init__(
             message="Two-factor authentication required.",
             error_code="AUTH_2FA_REQUIRED",
-            details={"temp_token": temp_token},
+        )
+        self.temp_token = temp_token
+
+
+class TwoFactorNotEnabledError(AuthShieldException):
+    def __init__(self):
+        super().__init__(
+            message="Two-factor authentication is not enabled on this account.",
+            error_code="AUTH_2FA_NOT_ENABLED",
+        )
+
+class TwoFactorAlreadyEnabledError(AuthShieldException):
+    def __init__(self):
+        super().__init__(
+            message="Two-factor authentication is already enabled on this account.",
+            error_code="AUTH_2FA_ALREADY_ENABLED",
         )
 
 
 class TwoFactorInvalidError(AuthShieldException):
-    """Wrong TOTP code provided."""
-    def __init__(self):
+    def __init__(self, message: str = "Invalid or expired 2FA code."):
         super().__init__(
-            message="Invalid verification code. Please try again.",
-            error_code="AUTH_2FA_INVALID_CODE",
+            message=message,
+            error_code="AUTH_2FA_INVALID",
         )
 
 

@@ -39,7 +39,9 @@ from app.core.exceptions import (
     TokenRevokedError,
     TwoFactorInvalidError,
     TwoFactorRequiredError,
-    UserNotFoundError,
+    TwoFactorNotEnabledError,
+    TwoFactorAlreadyEnabledError,
+    UserNotFoundError, 
 )
 from app.db.redis import close_redis_pool, init_redis_pool
 
@@ -190,14 +192,19 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(TwoFactorRequiredError)
     async def two_factor_required_handler(request: Request, exc: TwoFactorRequiredError):
-        # 200 because the login itself succeeded — 2FA is just a next step
         return JSONResponse(
-            status_code=status.HTTP_200_OK,
+            status_code=status.HTTP_403_FORBIDDEN,
             content={
-                "status": "success",
+                "status": "error",                    
                 "message": exc.message,
                 "error_code": exc.error_code,
-                "data": exc.details,
+                "details": {
+                    "temp_token": exc.temp_token,     
+                    "hint": (
+                        "Send temp_token + totp_code to "
+                        "POST /auth/2fa/verify to complete login."
+                    ),
+                },
             },
         )
 
@@ -205,6 +212,35 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def two_factor_invalid_handler(request: Request, exc: TwoFactorInvalidError):
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "status": "error",
+                "message": exc.message,
+                "error_code": exc.error_code,
+                "details": exc.details,
+            },
+        )
+    
+    @app.exception_handler(TwoFactorNotEnabledError)
+    async def two_factor_not_enabled_handler(
+        request: Request, 
+        exc: TwoFactorNotEnabledError):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "status": "error",
+                "message": exc.message,
+                "error_code": exc.error_code,
+                "details": exc.details,
+            },
+        )
+
+
+    @app.exception_handler(TwoFactorAlreadyEnabledError)
+    async def two_factor_already_enabled_handler(
+        request: Request, 
+        exc: TwoFactorAlreadyEnabledError):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
             content={
                 "status": "error",
                 "message": exc.message,
