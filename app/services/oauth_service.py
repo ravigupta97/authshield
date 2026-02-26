@@ -265,6 +265,9 @@ class OAuthService:
                     "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code",
                 },
+                # GitHub requires Accept: application/json
+                # to return JSON instead of URL-encoded form data
+                headers={"Accept": "application/json"},
                 timeout=10.0,
             )
 
@@ -400,3 +403,190 @@ class OAuthService:
             browser = "Unknown Browser"
 
         return f"{browser} on {os}"
+    
+    # ── GitHub OAuth ──────────────────────────────────────────────
+
+    async def get_github_auth_url(self) -> str:
+        """
+        Generate the GitHub OAuth authorization URL.
+
+        GitHub's OAuth flow is nearly identical to Google's.
+        Key differences:
+        - Different authorization URL
+        - scope is 'user:email' (not openid email profile)
+        - GitHub doesn't always return email in the main profile
+        endpoint — we need a separate /user/emails call
+        - No access_type or prompt parameters
+        """
+        state = generate_oauth_state()
+        redis = get_redis()
+        await redis.setex(
+            OAUTH_STATE_KEY.format(state=state),
+            OAUTH_STATE_TTL,
+            "1",
+        )
+
+        params = {
+            "client_id": settings.github_client_id,
+            "redirect_uri": settings.github_redirect_uri,
+            "scope": "user:email",
+            "state": state,
+        }
+
+        base_url = "https://github.com/login/oauth/authorize"
+        query_string = "&".join(f"{k}={v}" for k, v in params.items())
+        return f"{base_url}?{query_string}"
+
+    async def handle_github_callback(
+        self,
+        code: str,
+        state: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict:
+        """
+        Handle GitHub's callback after user grants consent.
+
+        Same pattern as Google but with GitHub-specific endpoints.
+        GitHub's user info is split across two endpoints:
+        - GET /user: profile data (name, avatar, id)
+        - GET /user/emails: email addresses (needed if email is private)
+        """
+        # Step 1: Verify CSRF state
+        await self._verify_oauth_state(state)
+
+        # Step 2: Exchange code for GitHub access token
+        github_tokens = await self._exchange_code_for_tokens(
+            code=code,
+            provider="github",
+            token_url="https://github.com/login/oauth/access_token",
+            client_id=settings.github_client_id,
+            client_secret=settings.github_client_secret,
+            redirect_uri=settings.github_redirect_uri,
+        )
+
+        access_token = github_tokens.get("access_token")
+        if not access_token:
+            raise AuthShieldException(
+                message="Failed to obtain access token from GitHub.",
+                error_code="OAUTH_GITHUB_TOKEN_FAILED",
+            )
+
+        # Step 3: Get user profile from GitHub
+        user_info = await self._get_github_user_info(access_token)
+
+        # Step 4: Find or create user
+        user, is_new_user = await self._find_or_create_oauth_user(
+            email=user_info["email"],
+            full_name=user_info.get("name") or user_info.get("login", ""),
+            avatar_url=user_info.get("avatar_url"),
+            provider="github",
+            provider_id=str(user_info["id"]),
+            email_verified=True,   # GitHub verifies emails before showing them
+        )
+
+        # Step 5: Issue JWT tokens
+        device_info = self._parse_device_info(user_agent)
+        token_data = await self.token_service.create_tokens_for_user(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_info=device_info,
+        )
+
+        await self.db.commit()
+
+        log.info(
+            "GitHub OAuth login successful",
+            user_id=str(user.id),
+            email=user_info["email"],
+            is_new_user=is_new_user,
+        )
+
+        return {
+            "access_token": token_data["access_token"],
+            "refresh_token": token_data["refresh_token"],
+            "token_type": token_data["token_type"],
+            "expires_in": token_data["expires_in"],
+            "user": {
+                "id": user.id,
+                "email": user_info["email"],
+                "full_name": user.full_name,
+                "roles": user.role_names,
+                "is_2fa_enabled": user.is_2fa_enabled,
+                "is_new_user": is_new_user,
+            },
+        }
+
+    async def _get_github_user_info(self, access_token: str) -> dict:
+        """
+        Fetch user profile and email from GitHub.
+
+        GitHub requires two separate API calls:
+        1. GET /user        → profile (id, name, avatar, login)
+        2. GET /user/emails → email list (needed for private emails)
+
+        WHY two calls for email?
+        GitHub users can set their email to private. In that case,
+        the /user endpoint returns null for email. We must call
+        /user/emails to get the verified primary email address.
+        """
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        async with httpx.AsyncClient() as client:
+            # Get profile
+            profile_response = await client.get(
+                "https://api.github.com/user",
+                headers=headers,
+                timeout=10.0,
+            )
+            if profile_response.status_code != 200:
+                raise AuthShieldException(
+                    message="Failed to retrieve profile from GitHub.",
+                    error_code="OAUTH_GITHUB_PROFILE_FAILED",
+                )
+            profile = profile_response.json()
+
+            # Get emails (handles private email setting)
+            emails_response = await client.get(
+                "https://api.github.com/user/emails",
+                headers=headers,
+                timeout=10.0,
+            )
+            if emails_response.status_code != 200:
+                raise AuthShieldException(
+                    message="Failed to retrieve email from GitHub.",
+                    error_code="OAUTH_GITHUB_EMAIL_FAILED",
+                )
+            emails = emails_response.json()
+
+        # Find the primary verified email
+        # GitHub can have multiple emails — we want primary + verified
+        primary_email = None
+        for email_obj in emails:
+            if email_obj.get("primary") and email_obj.get("verified"):
+                primary_email = email_obj["email"]
+                break
+
+        # Fallback: any verified email
+        if not primary_email:
+            for email_obj in emails:
+                if email_obj.get("verified"):
+                    primary_email = email_obj["email"]
+                    break
+
+        if not primary_email:
+            raise AuthShieldException(
+                message=(
+                    "No verified email found on your GitHub account. "
+                    "Please add and verify an email on GitHub, then try again."
+                ),
+                error_code="OAUTH_GITHUB_NO_EMAIL",
+            )
+
+        profile["email"] = primary_email
+        return profile
