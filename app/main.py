@@ -44,6 +44,7 @@ from app.core.exceptions import (
     UserNotFoundError, 
 )
 from app.db.redis import close_redis_pool, init_redis_pool
+from app.middleware.security import SecurityHeadersMiddleware
 
 log = structlog.get_logger()
 
@@ -118,6 +119,9 @@ def create_application() -> FastAPI:
         allow_headers=["*"],           # Allow all headers
         expose_headers=["X-Request-ID"],  # Allow frontend to read this header
     )
+
+    # Security Header Middleware
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # ── Routers ───────────────────────────────────────────────────
     # We'll uncomment these as we build each feature
