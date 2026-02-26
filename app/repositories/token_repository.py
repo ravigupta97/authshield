@@ -138,3 +138,17 @@ class TokenRepository:
             and not token.is_revoked
             and token.expires_at > now
         )
+    
+    async def get_by_session(
+        self,
+        refresh_token_id: uuid.UUID,
+    ) -> RefreshToken | None:
+        """
+        Fetch a refresh token by its primary key (ID).
+        Used when revoking a session — we have the token ID
+        from the session record and need the token object.
+        """
+        result = await self.db.execute(
+            select(RefreshToken).where(RefreshToken.id == refresh_token_id)
+        )
+        return result.scalar_one_or_none()

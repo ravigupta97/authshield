@@ -94,3 +94,21 @@ class SessionRepository:
         """Update the last active timestamp (called on token refresh)."""
         session.last_active_at = datetime.now(timezone.utc)
         await self.db.flush()
+
+    async def get_by_id_and_user(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> Session | None:
+        """
+        Fetch a session only if it belongs to the given user.
+        Used for ownership validation before revocation.
+        Returns None if session doesn't exist OR belongs to someone else.
+        """
+        result = await self.db.execute(
+            select(Session)
+            .where(Session.id == session_id)
+            .where(Session.user_id == user_id)
+            .where(Session.is_active == True)  # noqa: E712
+        )
+        return result.scalar_one_or_none()

@@ -18,7 +18,7 @@ repeating auth logic in every single endpoint.
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,7 @@ async def get_current_user(
         HTTPAuthorizationCredentials | None,
         Depends(bearer_scheme),
     ],
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
@@ -53,6 +54,10 @@ async def get_current_user(
     Extracts the JWT from the Authorization header, verifies it,
     checks the blacklist, loads the user from the database, and
     returns the User object.
+
+    Also stores the full JWT payload on request.state
+    so other parts of the request can access token claims
+    (like session_id and jti) without re-decoding.
 
     Usage in any protected endpoint:
         @router.get("/protected")
@@ -156,6 +161,14 @@ async def get_current_user(
                 "error_code": "AUTH_ACCOUNT_DISABLED",
             },
         )
+
+    # Store the full JWT payload on request.state so other
+    # dependencies and endpoints can access token claims without
+    # re-decoding. Particularly useful for:
+    # - session_id: identify current session in session listing
+    # - jti: blacklist current token on session revocation
+    # - exp: calculate remaining TTL for blacklist entry
+    request.state.token_payload = payload
 
     return user
 
