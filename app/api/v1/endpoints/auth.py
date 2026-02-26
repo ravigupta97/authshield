@@ -11,7 +11,7 @@ Responsibilities:
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.core.rate_limiter import RateLimiter
 from app.api.v1.dependencies import CurrentUser, get_db
 from app.schemas.auth import (
     LoginRequest,
@@ -42,7 +42,9 @@ bearer_scheme = HTTPBearer(auto_error=False)
 )
 async def register(
     request_data: RegisterRequest,
+    request: Request, 
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(RateLimiter("register")),
 ):
     service = AuthService(db)
     user_data = await service.register(
@@ -81,7 +83,9 @@ async def verify_email(
 )
 async def resend_verification(
     request_data: ResendVerificationRequest,
+    request: Request, 
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(RateLimiter("resend_verification")),
 ):
     service = AuthService(db)
     await service.resend_verification(email=request_data.email)
@@ -103,6 +107,7 @@ async def login(
     request_data: LoginRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(RateLimiter("login")),
 ):
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")

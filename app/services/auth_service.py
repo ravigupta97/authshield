@@ -110,7 +110,7 @@ class AuthService:
         """Authenticate user and issue tokens. (unchanged)"""
         user = await self.user_repo.get_by_email(email)
 
-        dummy_hash = "$2b$12$dummy.hash.to.prevent.timing.attacks.xxxxx"
+        dummy_hash = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/HS.iK8."
         password_to_check = user.password_hash if user else dummy_hash
         password_valid = verify_password(password, password_to_check)
 

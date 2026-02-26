@@ -5,9 +5,9 @@ Password management endpoints.
 Separated from auth.py to keep files focused and manageable.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.core.rate_limiter import RateLimiter
 from app.api.v1.dependencies import CurrentUser, get_db
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -33,7 +33,9 @@ router = APIRouter()
 )
 async def forgot_password(
     request_data: ForgotPasswordRequest,
+    request: Request,  
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(RateLimiter("forgot_password")),
 ):
     """
     Forgot password endpoint.

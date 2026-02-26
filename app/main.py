@@ -16,7 +16,7 @@ import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
+from app.core.rate_limiter import RateLimitResponse, RATE_LIMITS
 from app.config import settings
 from app.core.exceptions import (
     AccountDisabledError,
@@ -140,6 +140,35 @@ def register_exception_handlers(app: FastAPI) -> None:
     - No try/except boilerplate in every route handler
     - One place to change error response format for the whole API
     """
+
+    @app.exception_handler(RateLimitResponse)
+    async def rate_limit_handler(request: Request, exc: RateLimitResponse):
+        config = exc.config
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={
+                "status": "error",
+                "message": (
+                    f"Too many requests. "
+                    f"Maximum {config.requests} requests per "
+                    f"{config.window_seconds} seconds. "
+                    f"Please wait before trying again."
+                ),
+                "error_code": "SYS_RATE_LIMIT_EXCEEDED",
+                "details": {
+                    "limit": config.requests,
+                    "window_seconds": config.window_seconds,
+                    "endpoint": exc.endpoint,
+                },
+            },
+            headers={
+                # Standard rate limit headers — clients can use these
+                # to implement backoff without guessing
+                "Retry-After": str(config.window_seconds),
+                "X-RateLimit-Limit": str(config.requests),
+                "X-RateLimit-Window": str(config.window_seconds),
+            },
+        )
 
     @app.exception_handler(InvalidCredentialsError)
     @app.exception_handler(TokenExpiredError)

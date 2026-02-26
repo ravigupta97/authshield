@@ -19,7 +19,7 @@ DISABLE:
 
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.core.rate_limiter import RateLimiter
 from app.api.v1.dependencies import CurrentUser, get_db
 from app.schemas.common import StandardResponse
 from app.schemas.two_factor import (
@@ -108,6 +108,7 @@ async def verify_2fa_login(
     request_data: TwoFactorVerifyRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(RateLimiter("two_fa_verify")),
 ):
     """
     Complete 2FA login.
