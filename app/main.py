@@ -339,7 +339,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def generic_authshield_handler(request: Request, exc: AuthShieldException):
         """Catch-all for any AuthShield exception not handled above."""
         return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST,
             content={
                 "status": "error",
                 "message": exc.message,

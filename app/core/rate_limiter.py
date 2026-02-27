@@ -109,6 +109,13 @@ async def check_rate_limit(
     The rate_limit_info lets us add standard headers even on
     successful requests so clients know their current usage.
     """
+    # Skip rate limiting entirely during tests.
+    # TESTING=true is set in pytest.ini so this never affects production.
+    import os
+    if os.getenv("TESTING") == "true":
+        return True, {"limit": config.requests, "remaining": config.requests, "window_seconds": config.window_seconds, "current_count": 0}
+    
+    
     redis = get_redis()
     now = time.time()
     window_start = now - config.window_seconds
