@@ -45,6 +45,7 @@ from app.core.exceptions import (
 )
 from app.db.redis import close_redis_pool, init_redis_pool
 from app.middleware.security import SecurityHeadersMiddleware
+from app.core.openapi import custom_openapi
 
 log = structlog.get_logger()
 
@@ -84,6 +85,17 @@ async def lifespan(app: FastAPI):
 
 
 def create_application() -> FastAPI:
+    app = FastAPI(
+        title="AuthShield API",
+        version="1.0.0",
+        description="A standalone authentication and authorization microservice.",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        lifespan=lifespan,
+    )
+
+    app.openapi = lambda: custom_openapi(app)
     """
     Application factory function.
 
@@ -92,19 +104,6 @@ def create_application() -> FastAPI:
     multiple instances (e.g., one for production, one with test config).
     It also makes the startup logic explicit and testable.
     """
-    app = FastAPI(
-        title=settings.app_name,
-        version=settings.app_version,
-        description=(
-            "A standalone, generic, reusable authentication and authorization "
-            "microservice. Plug it into any project — no modification needed."
-        ),
-        # Disable docs in production for security
-        docs_url="/docs" if settings.is_development else None,
-        redoc_url="/redoc" if settings.is_development else None,
-        openapi_url="/openapi.json" if settings.is_development else None,
-        lifespan=lifespan,
-    )
 
     # ── Middleware ────────────────────────────────────────────────
     # IMPORTANT: Middleware is applied in REVERSE order.

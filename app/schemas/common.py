@@ -32,17 +32,40 @@ class StandardResponse(BaseModel, Generic[T]):
         "message": "Invalid credentials",
         "data": null
     }
+
+    Universal API response wrapper.
+
+    All endpoints return this shape:
+    {
+        "status": "success" | "error",
+        "message": "Human readable description",
+        "data": { ... } | null
+    }
+
+    WHY a wrapper?
+    Consistency. API consumers always know where to find data,
+    errors, and status. No guessing whether this endpoint returns
+    { "user": {...} } or { "data": {...} } or just { ... }.
+    
     """
     status: str
     message: str
     data: T | None = None
 
     @classmethod
-    def success(cls, message: str, data: Any = None) -> "StandardResponse":
+    def success(
+        cls,
+        message: str = "Success.",
+        data=None,
+    ) -> "StandardResponse":
         return cls(status="success", message=message, data=data)
 
     @classmethod
-    def error(cls, message: str, data: Any = None) -> "StandardResponse":
+    def error(
+        cls,
+        message: str,
+        data=None,
+    ) -> "StandardResponse":
         return cls(status="error", message=message, data=data)
 
 
@@ -67,7 +90,7 @@ class ErrorResponse(BaseModel):
     status: str = "error"
     message: str
     error_code: str
-    details: Any = None
+    details: dict | str | None = None
 
 
 class PaginatedData(BaseModel, Generic[T]):
