@@ -258,21 +258,21 @@ class TestLogout:
         refresh = regular_user["refresh_token"]
 
         # Logout
-        response = await client.post(
+        logout_response = await client.post(
             "/api/v1/auth/logout",
             json={"refresh_token": refresh},
             headers=auth_header(token),
         )
-        assert response.status_code == 200
+        assert logout_response.status_code == 200
 
         # Access token is now dead
         me_response = await client.get(
             "/api/v1/users/me",
             headers=auth_header(token),
         )
-        assert response.status_code == 401, f"Expected 401, got: {response.text}"
-        assert get_error_code(response) == "AUTH_TOKEN_REVOKED", (
-            f"Full response: {response.json()}"
+        assert me_response.status_code == 401, f"Expected 401, got: {me_response.text}"
+        assert get_error_code(me_response) == "AUTH_TOKEN_REVOKED", (
+            f"Full response: {me_response.json()}"
         )
 
     async def test_logout_all_devices(self, client: AsyncClient):
