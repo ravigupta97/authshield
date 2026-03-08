@@ -715,7 +715,7 @@ curl http://localhost:8000/api/v1/health
 - **PostgreSQL 15+**
 - **Redis 7+**
 - **Git**
-- **Docker** *(optional — recommended for production)*
+- **Docker**
 
 ---
 
