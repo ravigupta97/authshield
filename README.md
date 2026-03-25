@@ -1033,6 +1033,8 @@ tests/test_rate_limiting.py::TestLoginRateLimit::test_login_rate_limit_enforced 
 
 AuthShield is a standalone service. Your downstream projects need exactly **one file** and **one shared environment variable**.
 
+> 📖 **Full integration guide with multi-framework examples (FastAPI, Flask, Django, Express) and a complete E-Commerce walkthrough:** [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)
+
 ### The Mental Model
 
 ```
