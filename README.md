@@ -43,7 +43,7 @@
 
 **AuthShield** is a complete, standalone authentication microservice you build once and reuse across every project. It handles everything auth — registration, email verification, JWT token lifecycle, OAuth 2.0 social login, TOTP two-factor authentication, role-based access control, session management, and rate limiting — so your application services never have to implement any of it again.
 
-Downstream services share one `SECRET_KEY`, validate JWTs **locally with zero runtime calls to AuthShield per request**, and store the `user_id` UUID from the token as a foreign key in their own databases.
+Downstream services share one `JWT_SECRET_KEY`, validate JWTs **locally with zero runtime calls to AuthShield per request**, and store the `user_id` UUID from the token as a foreign key in their own databases.
 
 ### Why AuthShield?
 
@@ -259,7 +259,7 @@ authshield/
 │   └── seed_roles.py                   # Seeds user / moderator / admin roles
 │
 ├── Dockerfile                          # Multi-stage build (~180 MB final image)
-├── docker-compose.yml                  # api + postgres + redis + nginx, with health checks
+├── docker-compose.yml                  # authshield + postgres + redis, with health checks
 ├── .env.example                        # All environment variables documented
 ├── alembic.ini                         # Alembic configuration
 ├── pytest.ini                          # pytest + asyncio config
@@ -749,10 +749,10 @@ pip install -r requirements.txt
 #### 4️⃣ Configure environment
 ```bash
 cp .env.example .env
-# Open .env and fill in DATABASE_URL, REDIS_URL, SECRET_KEY, and SMTP credentials
+# Open .env and fill in DATABASE_URL, REDIS_URL, JWT_SECRET_KEY, and SMTP credentials
 ```
 
-**Generate a secure SECRET_KEY:**
+**Generate a secure JWT_SECRET_KEY:**
 ```powershell
 # Windows PowerShell
 python -c "import secrets; print(secrets.token_hex(32))"
@@ -789,10 +789,15 @@ uvicorn app.main:app --reload --port 8000
 
 ## 🐳 Docker & Production
 
-### 1️⃣ Configure the production environment
+### 1️⃣ Configure the environment file
 ```bash
-cp .env.example .env.production
-# Fill ALL values — especially SECRET_KEY, DB/Redis passwords, SMTP, OAuth credentials
+cp .env.example .env
+# Fill ALL values — especially JWT_SECRET_KEY, POSTGRES_PASSWORD, SMTP / OAuth credentials
+```
+
+**Generate a secure `JWT_SECRET_KEY`:**
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 ### 2️⃣ Build and start all services
@@ -800,39 +805,41 @@ cp .env.example .env.production
 docker-compose up -d --build
 ```
 
-This starts four containers on an isolated bridge network:
+This starts three containers on an isolated bridge network:
 
 | Container | Image | Role |
 |---|---|---|
-| `api` | Built from Dockerfile | FastAPI app (4 uvicorn workers) |
-| `postgres` | `postgres:15-alpine` | Database — data in named volume |
-| `redis` | `redis:7-alpine` | Cache + rate limiting |
-| `nginx` | `nginx:alpine` | HTTPS termination + reverse proxy |
+| `authshield_api` | Built from `Dockerfile` | FastAPI app (Uvicorn) |
+| `authshield_postgres` | `postgres:15-alpine` | Database — data in named volume |
+| `authshield_redis` | `redis:7-alpine` | Token blacklist, rate limiting, cache |
 
 ### 3️⃣ Run migrations and seed roles
 ```bash
-docker-compose exec api alembic upgrade head
-docker-compose exec api python scripts/seed_roles.py
+docker-compose exec authshield alembic upgrade head
+docker-compose exec authshield python scripts/seed_roles.py
 ```
 
 ### 4️⃣ Verify the deployment
 ```bash
-curl https://auth.yourdomain.com/api/v1/health
+curl http://localhost:8000/api/v1/health
 # {"status":"healthy","database":"ok","redis":"ok","version":"1.0.0"}
 ```
 
 ### Useful Docker Commands
 ```bash
 # Follow live logs
-docker-compose logs -f api
+docker-compose logs -f authshield
+
+# Open a shell inside the container
+docker-compose exec authshield bash
 
 # Restart a single service
-docker-compose restart api
+docker-compose restart authshield
 
-# Stop everything (keeps data)
+# Stop everything (data is preserved in named volumes)
 docker-compose down
 
-# Stop and wipe all data (destructive!)
+# Stop and wipe all data volumes (destructive!)
 docker-compose down -v
 ```
 
@@ -842,10 +849,10 @@ docker-compose down -v
 
 | Variable | Example | Notes |
 |---|---|---|
-| `ENVIRONMENT` | `production` | Enables HSTS, CSP, hides Swagger docs |
-| `SECRET_KEY` | 64-char hex string | `openssl rand -hex 32` — never commit |
-| `DATABASE_URL` | `postgresql+asyncpg://user:pw@postgres/db` | Use Docker service name `postgres` |
-| `REDIS_URL` | `redis://:password@redis:6379/0` | Use Docker service name `redis` |
+| `APP_ENV` | `production` | `development` \| `staging` \| `production` — enables HSTS + CSP in production |
+| `JWT_SECRET_KEY` | 64-char hex string | `python -c "import secrets; print(secrets.token_hex(32))"` — never commit |
+| `DATABASE_URL` | `postgresql+asyncpg://user:pw@postgres/db` | In Docker, use service name `postgres` |
+| `REDIS_URL` | `redis://redis:6379/0` | In Docker, use service name `redis` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Keep short in production |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Balance security vs UX |
 | `BCRYPT_ROUNDS` | `12` | Increase to 13–14 for extra security (~500 ms/hash) |
