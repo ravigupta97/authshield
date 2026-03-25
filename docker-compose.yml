@@ -1,0 +1,105 @@
+# =============================================================================
+# AuthShield — docker-compose.yml
+#
+# Brings up the full AuthShield stack with a single command:
+#   docker-compose up -d
+#
+# Services
+# ─────────
+#   postgres   → persistent relational store (data survives container restarts)
+#   redis      → token blacklist, rate-limit counters, session cache
+#   authshield → the API itself (depends on both postgres and redis)
+#
+# Quick start
+# ────────────
+#   1. cp .env.example .env
+#   2. Fill in JWT_SECRET_KEY, SMTP_* (or SENDGRID_API_KEY), OAuth secrets
+#   3. docker-compose up -d
+#   4. docker-compose exec authshield alembic upgrade head   ← run migrations
+#   5. curl http://localhost:8000/api/v1/health
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: authshield_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       authshield_db
+      POSTGRES_USER:     authshield_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authshield_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"          # expose to host for local DB tools (TablePlus, DBeaver)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authshield_user -d authshield_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: authshield_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"          # expose to host for debugging with redis-cli
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ── AuthShield API ─────────────────────────────────────────────────────────
+  authshield:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime            # use the final lean stage
+    container_name: authshield_api
+    restart: unless-stopped
+
+    # All env vars are read from your .env file.
+    # DATABASE_URL and REDIS_URL are overridden here so they point to the
+    # Docker service names (postgres / redis) rather than localhost.
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://authshield_user:${POSTGRES_PASSWORD:-authshield_secret}@postgres:5432/authshield_db
+      REDIS_URL:    redis://redis:6379/0
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s          # give Uvicorn time to start before first check
+
+    # Mount alembic folder so migrations can be run without rebuilding the image:
+    #   docker-compose exec authshield alembic upgrade head
+    volumes:
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+
+# ── Named volumes (data persists across `docker-compose down` restarts) ───────
+volumes:
+  postgres_data:
+    name: authshield_postgres_data
+  redis_data:
+    name: authshield_redis_data

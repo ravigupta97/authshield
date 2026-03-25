@@ -62,7 +62,7 @@ curl http://localhost:8000/api/v1/health
 # {"status":"healthy","database":"ok","redis":"ok","version":"1.0.0"}
 ```
 
-Note your `SECRET_KEY` — you will paste it into every future service's `.env`. That is the **only** value any downstream service needs from AuthShield.
+Note your `JWT_SECRET_KEY` — you will paste it into every future service's `.env` as `JWT_SECRET_KEY`. That is the **only** value any downstream service needs from AuthShield.
 
 ---
 
@@ -617,7 +617,8 @@ DATABASE_URL=postgresql+asyncpg://postgres:password@localhost/ecommerce_db
 # DATABASE_URL=postgresql://postgres:password@localhost/ecommerce_db
 
 # ── The ONLY value shared with AuthShield ─────────────────────────
-SECRET_KEY=paste-the-same-value-from-authshield-env-here
+# Copy exactly from authshield/.env → JWT_SECRET_KEY
+JWT_SECRET_KEY=paste-the-same-value-from-authshield-env-here
 
 # ── Optional: your service config ─────────────────────────────────
 PORT=8001
@@ -680,7 +681,7 @@ services:
     env_file: ./ecommerce-api/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:secret@postgres/ecommerce_db
-      SECRET_KEY: ${SECRET_KEY}        # same value as authshield/.env
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}  # same value as authshield/.env
     depends_on:
       postgres: { condition: service_healthy }
       authshield: { condition: service_started }
@@ -861,7 +862,7 @@ cp ecommerce-api/auth.py reviews-api/auth.py
 # or: cp ecommerce-api/src/auth.ts reviews-api/src/auth.ts
 
 # 2. Add one line to reviews-api/.env
-echo "SECRET_KEY=same-value-as-authshield" >> reviews-api/.env
+echo "JWT_SECRET_KEY=same-value-as-authshield" >> reviews-api/.env
 
 # 3. Add user_id column to your tables (no users table)
 # reviews-api/models.py  →  user_id = Column(UUID, nullable=False, index=True)
