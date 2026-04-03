@@ -27,6 +27,3 @@ htmlcov/
 .idea/
 *.swp
 
-# Alembic
-alembic/versions/*.py
-!alembic/versions/.gitkeep
