@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # ── Application ──────────────────────────────────────────────
     app_name: str = "AuthShield"
     app_version: str = "1.0.0"
-    app_env: Literal["development", "staging", "production"] = "development"
+    app_env: Literal["development", "staging", "production"] = "production"
     debug: bool = True
 
     # ── Server ───────────────────────────────────────────────────
