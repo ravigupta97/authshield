@@ -58,8 +58,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Start Uvicorn.
 # --workers is kept at 1 here; scale horizontally via docker-compose replicas
 # or a Kubernetes Deployment rather than multiple in-process workers.
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "1", \
-     "--log-level", "info"]
+CMD alembic upgrade head && \
+    python scripts/seed_roles.py && \
+    uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 1 \
+    --log-level info \
+    --proxy-headers \
+    --forwarded-allow-ips "*"
