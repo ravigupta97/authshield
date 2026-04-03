@@ -28,7 +28,7 @@ pyotp==2.9.0
 qrcode[pil]==8.2
 
 # Validation & Config
-pydantic[email-validator]==2.11.5
+pydantic[email]==2.11.5
 pydantic-settings==2.9.1
 python-dotenv==1.1.0
 
