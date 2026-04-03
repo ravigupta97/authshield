@@ -10,12 +10,12 @@ from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
 # Import settings to get the database URL
 from app.config import settings
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # Import Base and ALL models so Alembic can see them
 # If you add a new model file, import it here too
@@ -68,10 +68,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations using an async engine."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,  # Don't pool for migrations
+    connectable = create_async_engine(   # ← direct engine, not from config
+        settings.database_url,
+        poolclass=pool.NullPool,
+        connect_args={"ssl": "require"}, # ← SSL via connect_args
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

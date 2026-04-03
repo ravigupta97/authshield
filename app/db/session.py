@@ -34,11 +34,10 @@ from app.config import settings
 #   Set echo=False in production for performance.
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.is_development,   # Log SQL in dev, not in prod
+    echo=settings.is_development,
     pool_pre_ping=True,
-    pool_size=10,           # Keep 10 connections alive in the pool
-    max_overflow=20,        # Allow 20 more when pool is exhausted
-    pool_recycle=3600,      # Recycle connections after 1 hour (prevents stale connections)
+    poolclass=NullPool,              
+    connect_args={"ssl": "require"}, 
 )
 
 # Session factory — creates new AsyncSession instances.
