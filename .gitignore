@@ -4,6 +4,8 @@ venv/
 
 # Environment variables - NEVER commit this
 .env
+.env.production
+*.env
 
 # Python
 __pycache__/
