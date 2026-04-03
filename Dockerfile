@@ -59,7 +59,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # --workers is kept at 1 here; scale horizontally via docker-compose replicas
 # or a Kubernetes Deployment rather than multiple in-process workers.
 CMD alembic upgrade head && \
-    python scripts/seed_roles.py && \
+    python -m app.db.seed && \
     uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8000 \
