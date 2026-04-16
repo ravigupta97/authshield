@@ -152,28 +152,28 @@ Downstream services share one `JWT_SECRET_KEY`, validate JWTs **locally with zer
 
 ### API Base URL
 ```
-http://localhost:8000/api/v1
+https://authshield-31lz.onrender.com/docs
 ```
 
 ### Interactive Documentation
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+- **Swagger UI**: https://authshield-31lz.onrender.com/docs
+- **ReDoc**: https://authshield-31lz.onrender.com/redoc
 
 ### Health Check
 ```bash
-curl http://localhost:8000/api/v1/health
+curl https://authshield-31lz.onrender.com/api/v1/health
 # {"status":"healthy","database":"ok","redis":"ok","version":"1.0.0"}
 ```
 
 ### Quick Test
 ```bash
 # Register
-curl -X POST http://localhost:8000/api/v1/auth/register \
+curl -X POST https://authshield-31lz.onrender.com/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"TestPass123!","full_name":"Jane Doe"}'
 
 # Login (after verifying email)
-curl -X POST http://localhost:8000/api/v1/auth/login \
+curl -X POST https://authshield-31lz.onrender.com/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"TestPass123!"}'
 ```
