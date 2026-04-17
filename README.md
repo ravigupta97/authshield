@@ -1007,7 +1007,7 @@ redis-cli --scan --pattern "rate:*" | ForEach-Object { redis-cli DEL $_ }
 
 ### Test Results
 ```
-tests/test_admin.py::TestRBACEnforcement::test_regular_user_cannot_access_admin   PASSED
+tests/test_admin.py::TestRBACEnforcement::test_regular_user_cannot_access_admin    PASSED
 tests/test_admin.py::TestRBACEnforcement::test_admin_can_list_users                PASSED
 tests/test_admin.py::TestUserManagement::test_admin_can_deactivate_user            PASSED
 tests/test_admin.py::TestUserManagement::test_admin_cannot_remove_own_admin_role   PASSED
@@ -1028,10 +1028,10 @@ tests/test_rate_limiting.py::TestLoginRateLimit::test_login_rate_limit_enforced 
 
 | Concern | Approach |
 |---|---|
-| DB isolation | Each test wraps operations in a transaction that rolls back — no persistent test data |
+| DB isolation | Each test wraps operations in a transaction that rolls back - no persistent test data |
 | Rate limiting | Disabled via `TESTING=true` env var in all tests except `test_rate_limiting.py` |
 | Rate limit tests | `rate_limit_client` fixture temporarily unsets `TESTING` to enable real rate limiting |
-| Infrastructure | Real PostgreSQL and Redis — integration bugs that mocks hide are caught |
+| Infrastructure | Real PostgreSQL and Redis - integration bugs that mocks hide are caught |
 | Windows compat | `WindowsSelectorEventLoopPolicy` set in root `conftest.py` for Redis/asyncio compatibility |
 
 ---
